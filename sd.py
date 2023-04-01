@@ -39,6 +39,7 @@ def seed_everything(seed):
 class UNet2DConditionOutput:
     sample: torch.HalfTensor # Not sure how to check what unet_traced.pt contains, and user wants. HalfTensor or FloatTensor
 
+
 class StableDiffusion(nn.Module):
     def __init__(self, device, fp16, vram_O, sd_version='2.1', hf_key=None):
         super().__init__()
@@ -122,7 +123,6 @@ class StableDiffusion(nn.Module):
         # Cat for final embeddings
         text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
         return text_embeddings
-
 
     def train_step(self, text_embeddings, pred_rgb, guidance_scale=100):
         

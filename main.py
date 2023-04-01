@@ -177,9 +177,9 @@ if __name__ == '__main__':
         elif opt.guidance == 'clip':
             from nerf.clip import CLIP
             guidance = CLIP(device)
-        elif opt.guidance == 'controlnet-scribble':
+        elif opt.guidance == 'controlnet':
             from controlnet import ControlNet
-            guidance = ControlNet(device, cond_type='scribble')
+            guidance = ControlNet(opt.guidance_image_path, device, opt.fp16, opt.vram_O, type=opt.controlnet_type)
         else:
             raise NotImplementedError(f'--guidance {opt.guidance} is not implemented.')
 
