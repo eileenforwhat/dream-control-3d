@@ -10,6 +10,12 @@ from nerf.gui import NeRFGUI
 # torch.autograd.set_detect_anomaly(True)
 
 if __name__ == '__main__':
+    """
+    To run with controlnet:
+    
+    python main.py --text "purple bird" --workspace trial -O --guidance_image_path scribbles/bird_scribble.png
+    
+    """
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--text', default=None, help="text prompt")
@@ -60,6 +66,10 @@ if __name__ == '__main__':
     # rendering resolution in training, increase these for better quality / decrease these if CUDA OOM even if --vram_O enabled.
     parser.add_argument('--w', type=int, default=64, help="render width for NeRF in training")
     parser.add_argument('--h', type=int, default=64, help="render height for NeRF in training")
+    # controlnet
+    parser.add_argument('--guidance_image_path', type=str, default="")
+    parser.add_argument('--controlnet_type', type=str, default="scribble")
+    parser.add_argument('--controlnet_conditioning_scale', type=float, default=0.5)
 
     ### dataset options
     parser.add_argument('--bound', type=float, default=1, help="assume the scene is bounded in box(-bound, bound)")
@@ -179,11 +189,19 @@ if __name__ == '__main__':
             guidance = CLIP(device)
         elif opt.guidance == 'controlnet':
             from controlnet import ControlNet
-            guidance = ControlNet(opt.guidance_image_path, device, opt.fp16, opt.vram_O, type=opt.controlnet_type)
+            guidance = ControlNet(
+                opt.guidance_image_path, device, opt.fp16, opt.vram_O,
+                type=opt.controlnet_type, controlnet_conditioning_scale=opt.controlnet_conditioning_scale
+            )
         else:
             raise NotImplementedError(f'--guidance {opt.guidance} is not implemented.')
 
-        trainer = Trainer(' '.join(sys.argv), 'df', opt, model, guidance, device=device, workspace=opt.workspace, optimizer=optimizer, ema_decay=None, fp16=opt.fp16, lr_scheduler=scheduler, use_checkpoint=opt.ckpt, eval_interval=opt.eval_interval, scheduler_update_every_step=True)
+        trainer = Trainer(
+            ' '.join(sys.argv), 'df', opt, model, guidance,
+            device=device, workspace=opt.workspace, optimizer=optimizer, ema_decay=None, fp16=opt.fp16,
+            lr_scheduler=scheduler, use_checkpoint=opt.ckpt, eval_interval=opt.eval_interval,
+            scheduler_update_every_step=True
+        )
 
         if opt.gui:
             trainer.train_loader = train_loader # attach dataloader to trainer
