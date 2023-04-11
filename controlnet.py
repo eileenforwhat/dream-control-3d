@@ -16,27 +16,15 @@ type2model_id = {
 
 
 class ControlNet(nn.Module):
-    def __init__(self, image_path, device, fp16, vram_O, type='scribble', hed=False):
-        """
-
-        Args:
-            device:
-            image_path:
-            fp16:
-            vram_O:
-            type:
-        """
+    def __init__(
+            self, guidance_image_path, device, fp16, vram_O,
+            type='scribble', controlnet_conditioning_scale=1.0
+    ):
         super().__init__()
 
         self.device = device
 
         print(f'[INFO] loading controlnet...')
-
-        self.image = load_image(image_path)
-        if hed:
-            hed = HEDdetector.from_pretrained('lllyasviel/ControlNet')
-            self.image = hed(self.image, scribble=True)
-            # TODO call self.pipe.prepare_image
 
         controlnet_model_id, sd_model_id = type2model_id[type]
         controlnet = ControlNetModel.from_pretrained(controlnet_model_id, torch_dtype=torch.float16)
@@ -70,6 +58,7 @@ class ControlNet(nn.Module):
         self.text_encoder = pipe.text_encoder
         self.unet = pipe.unet
         self.controlnet = pipe.controlnet
+        self.controlnet_conditioning_scale = controlnet_conditioning_scale
 
         self.scheduler = DDIMScheduler.from_pretrained(sd_model_id, subfolder="scheduler", torch_dtype=precision_t)
 
@@ -77,6 +66,25 @@ class ControlNet(nn.Module):
         self.min_step = int(self.num_train_timesteps * 0.02)
         self.max_step = int(self.num_train_timesteps * 0.98)
         self.alphas = self.scheduler.alphas_cumprod.to(self.device)  # for convenience
+
+        # Prepare image
+        assert guidance_image_path, "Must provide guidance_image_path for ControlNet guidance!"
+        height, width = 512, 512
+        self.image = load_image(guidance_image_path)
+        hed = HEDdetector.from_pretrained('lllyasviel/ControlNet')
+        self.image = hed(self.image, scribble=True)
+
+        num_images_per_prompt = 1
+        batch_size = 1
+        self.image = pipe.prepare_image(
+            self.image,
+            width,
+            height,
+            batch_size * num_images_per_prompt,
+            num_images_per_prompt,
+            device,
+            self.controlnet.dtype,
+        )
 
         print(f'[INFO] loaded control net!')
 
@@ -119,7 +127,6 @@ class ControlNet(nn.Module):
 
         # predict the noise residual with unet, NO grad!
         with torch.no_grad():
-            # TODO: add self.controlnet in here
             # add noise
             noise = torch.randn_like(latents)
             latents_noisy = self.scheduler.add_noise(latents, noise, t)
@@ -129,11 +136,28 @@ class ControlNet(nn.Module):
             #torch.save(latent_model_input, "train_latent_model_input.pt")
             #torch.save(t, "train_t.pt")
             #torch.save(text_embeddings, "train_text_embeddings.pt")
+            down_block_res_samples, mid_block_res_sample = self.controlnet(
+                latent_model_input,
+                t,
+                encoder_hidden_states=text_embeddings,
+                controlnet_cond=self.image,
+                return_dict=False,
+            )
+
+            down_block_res_samples = [
+                down_block_res_sample * self.controlnet_conditioning_scale
+                for down_block_res_sample in down_block_res_samples
+            ]
+            mid_block_res_sample *= self.controlnet_conditioning_scale
+
+            # predict the noise residual
             noise_pred = self.unet(
                 latent_model_input,
                 t,
-                encoder_hidden_states=text_embeddings
-            ).sample
+                encoder_hidden_states=text_embeddings,
+                down_block_additional_residuals=down_block_res_samples,
+                mid_block_additional_residual=mid_block_res_sample,
+            )["sample"]
 
         # perform guidance (high scale from paper!)
         noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -154,7 +178,7 @@ class ControlNet(nn.Module):
         return loss
 
     def produce_latents(
-            self, text_embeddings, height=512, width=512, num_inference_steps=50, guidance_scale=7.5, latents=None
+        self, text_embeddings, height=512, width=512, num_inference_steps=50, guidance_scale=7.5, latents=None,
     ):
         if latents is None:
             latents = torch.randn(
@@ -174,7 +198,28 @@ class ControlNet(nn.Module):
                 #torch.save(text_embeddings, "produce_latents_text_embeddings.pt")
                 # predict the noise residual
                 with torch.no_grad():
-                    noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings)['sample']
+                    down_block_res_samples, mid_block_res_sample = self.controlnet(
+                        latent_model_input,
+                        t,
+                        encoder_hidden_states=text_embeddings,
+                        controlnet_cond=self.image,
+                        return_dict=False,
+                    )
+
+                    down_block_res_samples = [
+                        down_block_res_sample * self.controlnet_conditioning_scale
+                        for down_block_res_sample in down_block_res_samples
+                    ]
+                    mid_block_res_sample *= self.controlnet_conditioning_scale
+
+                    # predict the noise residual
+                    noise_pred = self.unet(
+                        latent_model_input,
+                        t,
+                        encoder_hidden_states=text_embeddings,
+                        down_block_additional_residuals=down_block_res_samples,
+                        mid_block_additional_residual=mid_block_res_sample,
+                    )["sample"]
 
                 # perform guidance
                 noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -200,8 +245,7 @@ class ControlNet(nn.Module):
         return latents
 
     def prompt_to_img(
-            self, prompts, negative_prompts='', height=512, width=512,
-            num_inference_steps=50, guidance_scale=7.5, latents=None
+        self, prompts, negative_prompts='', height=512, width=512, num_inference_steps=50, guidance_scale=7.5
     ):
         if isinstance(prompts, str):
             prompts = [prompts]
@@ -213,11 +257,11 @@ class ControlNet(nn.Module):
 
         # Text embeds -> img latents
         latents = self.produce_latents(
-            text_embeds, height=height, width=width, latents=latents,
-            num_inference_steps=num_inference_steps, guidance_scale=guidance_scale)  # [1, 4, 64, 64]
+            text_embeds, height=height, width=width, num_inference_steps=num_inference_steps, guidance_scale=guidance_scale
+        )  # [1, 4, 64, 64]
 
         # Img latents -> imgs
-        imgs = self.decode_latents(latents) # [1, 3, 512, 512]
+        imgs = self.decode_latents(latents)  # [1, 3, 512, 512]
 
         # Img to Numpy
         imgs = imgs.detach().cpu().permute(0, 2, 3, 1).numpy()
@@ -227,14 +271,17 @@ class ControlNet(nn.Module):
 
 if __name__ == '__main__':
     """
+    python controlnet.py "bird flying into the sunset" --guidance_image_path scribbles/bird_scribble.png \
+        --controlnet_conditioning_scale 0.5
     """
     import argparse
     import matplotlib.pyplot as plt
 
     parser = argparse.ArgumentParser()
     parser.add_argument('prompt', type=str)
-    parser.add_argument('guidance_image_path', type=str, default=None)
 
+    parser.add_argument('--guidance_image_path', type=str, default=None)
+    parser.add_argument('--controlnet_conditioning_scale', type=float, default=1.0)
     parser.add_argument('--negative', default='', type=str)
     parser.add_argument('--controlnet_type', type=str, default='scribble', choices=['scribble'])
     parser.add_argument('--fp16', action='store_true', help="use float16 for training")
@@ -248,9 +295,15 @@ if __name__ == '__main__':
     seed_everything(opt.seed)
     device = torch.device('cuda')
 
-    controlnet = ControlNet(opt.guidance_image_path, device, opt.fp16, opt.vram_O, opt.controlnet_type)
-    imgs = controlnet.prompt_to_img(opt.prompt, opt.negative, opt.H, opt.W, opt.steps)
+    controlnet = ControlNet(
+        opt.guidance_image_path, opt.H, opt.W, device, opt.fp16, opt.vram_O, opt.controlnet_type,
+        controlnet_conditioning_scale=opt.controlnet_conditioning_scale
+    )
+    imgs = controlnet.prompt_to_img(
+        opt.prompt,
+        negative_prompts=opt.negative,
+        height=opt.H, width=opt.W,
+        num_inference_steps=opt.steps,
+    )
 
-    # visualize image
-    plt.imshow(imgs[0])
-    plt.show()
+    plt.imsave("output/test_scribble_05.png", imgs[0])
