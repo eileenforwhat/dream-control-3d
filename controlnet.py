@@ -296,7 +296,7 @@ if __name__ == '__main__':
     device = torch.device('cuda')
 
     controlnet = ControlNet(
-        opt.guidance_image_path, opt.H, opt.W, device, opt.fp16, opt.vram_O, opt.controlnet_type,
+        opt.guidance_image_path, device, opt.fp16, opt.vram_O, opt.controlnet_type,
         controlnet_conditioning_scale=opt.controlnet_conditioning_scale
     )
     imgs = controlnet.prompt_to_img(
