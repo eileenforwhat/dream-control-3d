@@ -4,9 +4,14 @@ build/
 *.so
 
 tmp*
-data/
+# data/
+ldm/data/
 trial*/
 .vs/
 .idea*
 
 TOKEN
+*.ckpt
+
+densegridencoder
+tets/256_tets.npz

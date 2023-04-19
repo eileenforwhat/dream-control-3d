@@ -33,11 +33,11 @@ parser.add_argument('--num_steps', type=int, default=64, help="num steps sampled
 parser.add_argument('--upsample_steps', type=int, default=64, help="num steps up-sampled per ray (only valid when not using --cuda_ray)")
 parser.add_argument('--update_extra_interval', type=int, default=16, help="iter interval to update extra status (only valid when using --cuda_ray)")
 parser.add_argument('--max_ray_batch', type=int, default=4096, help="batch size of rays at inference to avoid OOM (only valid when not using --cuda_ray)")
-parser.add_argument('--albedo_iters', type=int, default=1000, help="training iters that only use albedo shading")
+parser.add_argument('--warmup_iters', type=int, default=1000, help="training iters that only use albedo shading")
 parser.add_argument('--uniform_sphere_rate', type=float, default=0.5, help="likelihood of sampling camera location uniformly on the sphere surface area")
 # model options
 parser.add_argument('--bg_radius', type=float, default=1.4, help="if positive, use a background model at sphere(bg_radius)")
-parser.add_argument('--density_activation', type=str, default='softplus', choices=['softplus', 'exp'] help="density activation function")
+parser.add_argument('--density_activation', type=str, default='softplus', choices=['softplus', 'exp'], help="density activation function")
 parser.add_argument('--density_thresh', type=float, default=10, help="threshold for density grid to be occupied")
 parser.add_argument('--blob_density', type=float, default=10, help="max (center) density for the density blob")
 parser.add_argument('--blob_radius', type=float, default=0.3, help="control the radius for the density blob")
@@ -59,8 +59,6 @@ parser.add_argument('--dt_gamma', type=float, default=0, help="dt_gamma (>=0) fo
 parser.add_argument('--min_near', type=float, default=0.1, help="minimum near distance for camera")
 parser.add_argument('--radius_range', type=float, nargs='*', default=[1.0, 1.5], help="training camera radius range")
 parser.add_argument('--fovy_range', type=float, nargs='*', default=[40, 70], help="training camera fovy range")
-parser.add_argument('--dir_text', action='store_true', help="direction-encode the text prompt, by appending front/side/back/overhead view")
-parser.add_argument('--suppress_face', action='store_true', help="also use negative dir text prompt.")
 parser.add_argument('--angle_overhead', type=float, default=30, help="[0, angle_overhead] is the overhead region")
 parser.add_argument('--angle_front', type=float, default=60, help="[0, angle_front] is the front region, [180, 180+angle_front] the back region, otherwise the side region.")
 
@@ -85,7 +83,6 @@ opt = parser.parse_args()
 
 # default to use -O !!!
 opt.fp16 = True
-opt.dir_text = True
 opt.cuda_ray = True
 opt.vram_O = True
 # opt.lambda_entropy = 1e-4
@@ -105,10 +102,10 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'[INFO] loading models..')
 
 if opt.guidance == 'stable-diffusion':
-    from sd import StableDiffusion
+    from guidance.sd_utils import StableDiffusion
     guidance = StableDiffusion(device, opt.fp16, opt.vram_O, opt.sd_version, opt.hf_key)
 elif opt.guidance == 'clip':
-    from nerf.clip import CLIP
+    from guidance.clip_utils import CLIP
     guidance = CLIP(device)
 else:
     raise NotImplementedError(f'--guidance {opt.guidance} is not implemented.')

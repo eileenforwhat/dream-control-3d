@@ -1,3 +1,4 @@
+import math
 import numpy as np
 
 import torch
@@ -38,7 +39,7 @@ class _grid_encode(Function):
         S = np.log2(per_level_scale) # resolution multiplier at each level, apply log2 for later CUDA exp2f
         H = base_resolution # base resolution
 
-        max_level = L if max_level is None else min(max_level, L)
+        max_level = L if max_level is None else max(min(int(math.ceil(max_level * L)), L), 1)
 
         # manually handle autocast (only use half precision embeddings, inputs must be float for enough precision)
         # if C % 2 != 0, force float, since half for atomicAdd is very slow.
@@ -126,7 +127,7 @@ class GridEncoder(nn.Module):
         self.max_params = 2 ** log2_hashmap_size
         for i in range(num_levels):
             resolution = int(np.ceil(base_resolution * per_level_scale ** i))
-            params_in_level = min(self.max_params, (resolution if align_corners else resolution + 1) ** input_dim) # limit max number
+            params_in_level = min(self.max_params, (resolution) ** input_dim) # limit max number
             params_in_level = int(np.ceil(params_in_level / 8) * 8) # make divisible
             offsets.append(offset)
             offset += params_in_level
@@ -190,3 +191,16 @@ class GridEncoder(nn.Module):
             raise ValueError('grad is None, should be called after loss.backward() and before optimizer.step()!')
 
         _backend.grad_total_variation(inputs, self.embeddings, self.embeddings.grad, self.offsets, weight, B, D, C, L, S, H, self.gridtype_id, self.align_corners)
+    
+    @torch.cuda.amp.autocast(enabled=False)
+    def grad_weight_decay(self, weight=0.1):
+        # level-wise meaned weight decay (ref: zip-nerf)
+        
+        B = self.embeddings.shape[0] # size of embedding
+        C = self.embeddings.shape[1] # embedding dim for each level
+        L = self.offsets.shape[0] - 1 # level
+        
+        if self.embeddings.grad is None:
+            raise ValueError('grad is None, should be called after loss.backward() and before optimizer.step()!')
+
+        _backend.grad_weight_decay(self.embeddings, self.embeddings.grad, self.offsets, weight, B, C, L)
