@@ -105,7 +105,6 @@ class ControlNet(nn.Module):
             num_images_per_prompt,
             device,
             self.controlnet.dtype,
-            do_classifier_free_guidance = False # not sure why needed this, already keyword arg but gave error if wasn't there for running experiment 2
         )
 
         print(f'[INFO] loaded control net!')
