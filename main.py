@@ -8,6 +8,40 @@ from nerf.gui import NeRFGUI
 
 # torch.autograd.set_detect_anomaly(True)
 
+
+def set_opt_for_zero1to3(opt):
+    opt.text = None
+    opt.guidance = 'zero123'
+
+    opt.fovy_range = [opt.default_fovy, opt.default_fovy] # fix fov as zero123 doesn't support changing fov
+
+    # very important to keep the image's content
+    opt.guidance_scale = 3
+    opt.lambda_guidance = 0.01
+    opt.grad_clip = 1
+
+    # enforce surface smoothness in nerf stage
+    opt.lambda_normal_smooth = 1
+    opt.lambda_orient = 100
+
+    # latent warmup is not needed, we hardcode a 100-iter rgbd loss only warmup.
+    opt.warmup_iters = 0
+
+    # make shape init more stable
+    opt.progressive_view = True
+    opt.progressive_level = True
+    # record full range for progressive view expansion
+    # disable as they disturb progressive view
+    opt.jitter_pose = False
+    opt.uniform_sphere_rate = 0
+    # back up full range
+    opt.full_radius_range = opt.radius_range
+    opt.full_theta_range = opt.theta_range
+    opt.full_phi_range = opt.phi_range
+    opt.full_fovy_range = opt.fovy_range
+    return opt
+
+
 if __name__ == '__main__':
     """
     To run with controlnet:
@@ -281,6 +315,21 @@ if __name__ == '__main__':
                 opt.guidance_image_path, device, opt.fp16, opt.vram_O,
                 type=opt.controlnet_type, controlnet_conditioning_scale=opt.controlnet_conditioning_scale
             )
+        elif opt.guidance == 'controlnet-zero123':
+            # basically just use controlnet to generate --image and then use zero1to3 guidance as usual
+            from guidance.controlnet_utils import ControlNet, save_and_prepare_image
+            controlnet = ControlNet(
+                opt.guidance_image_path, device, opt.fp16, opt.vram_O,
+                type=opt.controlnet_type, controlnet_conditioning_scale=opt.controlnet_conditioning_scale
+            )
+            image = controlnet.prompt_to_img(opt.text, opt.negative, height=opt.H, width=opt.W,
+                                             num_inference_steps=opt.steps, guidance_scale=opt.guidance_scale)
+
+            opt.image = save_and_prepare_image(image, opt.guidance_image_path, out_dir="data")
+
+            from guidance.zero123_utils import Zero123
+            opt = set_opt_for_zero1to3(opt)
+            guidance = Zero123(device, opt.fp16, opt.vram_O, opt.t_range)
         else:
             raise NotImplementedError(f'--guidance {opt.guidance} is not implemented.')
 
