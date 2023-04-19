@@ -13,7 +13,7 @@ if __name__ == '__main__':
     To run with controlnet:
     
     python main.py --text "purple bird" --workspace trial -O \
-        --guidance_image_path scribbles/bird_scribble.png --guidance controlnet
+        --guidance_image_path scribbles/bird.png --guidance controlnet
     
     """
 
