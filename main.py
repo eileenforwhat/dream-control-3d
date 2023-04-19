@@ -324,7 +324,6 @@ if __name__ == '__main__':
             )
             image = controlnet.prompt_to_img(opt.text, opt.negative, height=opt.H, width=opt.W,
                                              num_inference_steps=opt.steps, guidance_scale=opt.guidance_scale)
-
             opt.image = save_and_prepare_image(image, opt.guidance_image_path, out_dir="data")
 
             from guidance.zero123_utils import Zero123

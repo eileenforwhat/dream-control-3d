@@ -38,6 +38,7 @@ def seed_everything(seed):
 
 def save_and_prepare_image(image, img_path, out_dir="data"):
     # image: numpy image
+    # img_path: guidance_img_path for controlnet (ex. scribble img path)
     out_rgba = os.path.join(out_dir, os.path.basename(img_path).split('.')[0] + '_rgba.png')
     out_depth = os.path.join(out_dir, os.path.basename(img_path).split('.')[0] + '_depth.png')
     print(f"writing controlnet images to {out_rgba} and {out_depth}")
@@ -53,6 +54,7 @@ def save_and_prepare_image(image, img_path, out_dir="data"):
     print(f'[INFO] background removal...')
     image = BackgroundRemoval()(image) # [H, W, 4]
     cv2.imwrite(out_rgba, cv2.cvtColor(image, cv2.COLOR_RGBA2BGRA))
+    return out_rgba
 
 
 # condition type to (controlnet model, stable-diffusion model)
