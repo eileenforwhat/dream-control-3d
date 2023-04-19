@@ -31,6 +31,7 @@ if __name__ == '__main__':
     parser.add_argument('--image', default=None, help="image prompt")
     parser.add_argument('--known_view_interval', type=int, default=2, help="train default view with RGB loss every & iters, only valid if --image is not None.")
     parser.add_argument('--guidance_scale', type=float, default=100, help="diffusion model classifier-free guidance scale")
+    parser.add_argument('--default_view', action="store_true", help = "if set, then will give extra important on the default view during training as per opt.known_view_interval")
 
     parser.add_argument('--save_mesh', action='store_true', help="export an obj mesh with texture")
     parser.add_argument('--mcubes_resolution', type=int, default=256, help="mcubes resolution for extracting mesh")

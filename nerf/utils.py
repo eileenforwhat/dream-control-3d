@@ -332,9 +332,16 @@ class Trainer(object):
 
     def train_step(self, data):
 
+        # perform RGBD loss instead of SDS if is guidance image conditioned
+        do_guidance_image_loss = self.opt.default_view and \
+            self.opt.guidance_image_path is not None and \
+            (self.global_step < 100 or self.global_step % self.opt.known_view_interval == 0)
+
         # perform RGBD loss instead of SDS if is image-conditioned
         do_rgbd_loss = self.opt.image is not None and \
             (self.global_step < 100 or self.global_step % self.opt.known_view_interval == 0)
+
+        do_rgbd_loss = do_rgbd_loss or do_guidance_image_loss
 
         # override random camera with fixed known camera
         if do_rgbd_loss:
