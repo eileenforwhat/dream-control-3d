@@ -4,7 +4,7 @@ DATA_DIR=/mnt/data
 python main.py --text "a wooden chair with cushions on the seat" --workspace $DATA_DIR/exp2_chair -O --guidance controlnet --guidance_image_path scribbles/chair.png --known_view_interval 5
 python main.py --workspace $DATA_DIR/exp2_chair -O --test
 
-python main.py --text "a wooden chair with cushions on the seat" --workspace $DATA_DIR/exp2_chair_2 -O --guidance controlnet --guidance_image_path scribbles/chair_2.png --known_view_interval 2
+python main.py --text "a wooden chair with cushions on the seat" --workspace $DATA_DIR/exp2_chair_2 -O --guidance controlnet --guidance_image_path scribbles/chair_2.png --known_view_interval 5
 python main.py --workspace $DATA_DIR/exp2_chair_2 -O --test
 
 python main.py --text "a wooden chair with cushions on the seat" --workspace $DATA_DIR/exp2_couch -O --guidance controlnet --guidance_image_path scribbles/couch.png --known_view_interval 5
