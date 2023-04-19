@@ -1,12 +1,34 @@
 import torch.nn as nn
-from diffusers import DDIMScheduler, StableDiffusionControlNetPipeline, ControlNetModel, UniPCMultistepScheduler
 import torch
-from controlnet_aux import HEDdetector
-from diffusers.utils.import_utils import is_xformers_available
 import torch.nn.functional as F
+from controlnet_aux import HEDdetector
+from diffusers import (
+    DDIMScheduler, StableDiffusionControlNetPipeline, ControlNetModel, UniPCMultistepScheduler,
+)
 from diffusers.utils import load_image
+from diffusers.utils.import_utils import is_xformers_available
+from torch.cuda.amp import custom_bwd, custom_fwd
 
-from sd import SpecifyGradient, seed_everything
+
+class SpecifyGradient(torch.autograd.Function):
+    @staticmethod
+    @custom_fwd
+    def forward(ctx, input_tensor, gt_grad):
+        ctx.save_for_backward(gt_grad)
+        # we return a dummy value 1, which will be scaled by amp's scaler so we get the scale in backward.
+        return torch.ones([1], device=input_tensor.device, dtype=input_tensor.dtype)
+
+    @staticmethod
+    @custom_bwd
+    def backward(ctx, grad_scale):
+        gt_grad, = ctx.saved_tensors
+        gt_grad = gt_grad * grad_scale
+        return gt_grad, None
+
+
+def seed_everything(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
 
 
 # condition type to (controlnet model, stable-diffusion model)
@@ -17,8 +39,7 @@ type2model_id = {
 
 class ControlNet(nn.Module):
     def __init__(
-            self, guidance_image_path, device, fp16, vram_O,
-            type='scribble', controlnet_conditioning_scale=1.0
+        self, guidance_image_path, device, fp16, vram_O, type='scribble', controlnet_conditioning_scale=1.0
     ):
         super().__init__()
 
@@ -88,42 +109,27 @@ class ControlNet(nn.Module):
 
         print(f'[INFO] loaded control net!')
 
-    def get_text_embeds(self, prompt, negative_prompt):
-        """ Same as StableDiffusion.get_text_embeds
-        """
+    @torch.no_grad()
+    def get_text_embeds(self, prompt):
         # prompt, negative_prompt: [str]
 
-        # Tokenize text and get embeddings
-        text_input = self.tokenizer(
-            prompt, padding='max_length', max_length=self.tokenizer.model_max_length,
-            truncation=True, return_tensors='pt'
-        )
+        # positive
+        inputs = self.tokenizer(prompt, padding='max_length', max_length=self.tokenizer.model_max_length, return_tensors='pt')
+        embeddings = self.text_encoder(inputs.input_ids.to(self.device))[0]
 
-        with torch.no_grad():
-            text_embeddings = self.text_encoder(text_input.input_ids.to(self.device))[0]
+        return embeddings
 
-        # Do the same for unconditional embeddings
-        uncond_input = self.tokenizer(
-            negative_prompt, padding='max_length', max_length=self.tokenizer.model_max_length,
-            return_tensors='pt'
-        )
-
-        with torch.no_grad():
-            uncond_embeddings = self.text_encoder(uncond_input.input_ids.to(self.device))[0]
-
-        # Cat for final embeddings
-        text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
-        return text_embeddings
-
-    def train_step(self, text_embeddings, pred_rgb, guidance_scale=100):
-        # interp to 512x512 to be fed into vae.
-        pred_rgb_512 = F.interpolate(pred_rgb, (512, 512), mode='bilinear', align_corners=False)
+    def train_step(self, text_embeddings, pred_rgb, guidance_scale=100, as_latent=False, grad_scale=1):
+        if as_latent:
+            latents = F.interpolate(pred_rgb, (64, 64), mode='bilinear', align_corners=False) * 2 - 1
+        else:
+            # interp to 512x512 to be fed into vae.
+            pred_rgb_512 = F.interpolate(pred_rgb, (512, 512), mode='bilinear', align_corners=False)
+            # encode image into latents with vae, requires grad!
+            latents = self.encode_imgs(pred_rgb_512)
 
         # timestep ~ U(0.02, 0.98) to avoid very high/low noise level
         t = torch.randint(self.min_step, self.max_step + 1, [1], dtype=torch.long, device=self.device)
-
-        # encode image into latents with vae, requires grad!
-        latents = self.encode_imgs(pred_rgb_512)
 
         # predict the noise residual with unet, NO grad!
         with torch.no_grad():
@@ -132,10 +138,6 @@ class ControlNet(nn.Module):
             latents_noisy = self.scheduler.add_noise(latents, noise, t)
             # pred noise
             latent_model_input = torch.cat([latents_noisy] * 2)
-            # Save input tensors for UNet
-            #torch.save(latent_model_input, "train_latent_model_input.pt")
-            #torch.save(t, "train_t.pt")
-            #torch.save(text_embeddings, "train_text_embeddings.pt")
             down_block_res_samples, mid_block_res_sample = self.controlnet(
                 latent_model_input,
                 t,
@@ -166,7 +168,7 @@ class ControlNet(nn.Module):
         # w(t), sigma_t^2
         w = (1 - self.alphas[t])
         # w = self.alphas[t] ** 0.5 * (1 - self.alphas[t])
-        grad = w * (noise_pred - noise)
+        grad = grad_scale * w * (noise_pred - noise)
 
         # clip grad for stable training?
         # grad = grad.clamp(-10, 10)
@@ -177,6 +179,7 @@ class ControlNet(nn.Module):
 
         return loss
 
+    @torch.no_grad()
     def produce_latents(
         self, text_embeddings, height=512, width=512, num_inference_steps=50, guidance_scale=7.5, latents=None,
     ):
@@ -192,34 +195,29 @@ class ControlNet(nn.Module):
                 # expand the latents if we are doing classifier-free guidance to avoid doing two forward passes.
                 latent_model_input = torch.cat([latents] * 2)
 
-                # Save input tensors for UNet
-                #torch.save(latent_model_input, "produce_latents_latent_model_input.pt")
-                #torch.save(t, "produce_latents_t.pt")
-                #torch.save(text_embeddings, "produce_latents_text_embeddings.pt")
                 # predict the noise residual
-                with torch.no_grad():
-                    down_block_res_samples, mid_block_res_sample = self.controlnet(
-                        latent_model_input,
-                        t,
-                        encoder_hidden_states=text_embeddings,
-                        controlnet_cond=self.image,
-                        return_dict=False,
-                    )
+                down_block_res_samples, mid_block_res_sample = self.controlnet(
+                    latent_model_input,
+                    t,
+                    encoder_hidden_states=text_embeddings,
+                    controlnet_cond=self.image,
+                    return_dict=False,
+                )
 
-                    down_block_res_samples = [
-                        down_block_res_sample * self.controlnet_conditioning_scale
-                        for down_block_res_sample in down_block_res_samples
-                    ]
-                    mid_block_res_sample *= self.controlnet_conditioning_scale
+                down_block_res_samples = [
+                    down_block_res_sample * self.controlnet_conditioning_scale
+                    for down_block_res_sample in down_block_res_samples
+                ]
+                mid_block_res_sample *= self.controlnet_conditioning_scale
 
-                    # predict the noise residual
-                    noise_pred = self.unet(
-                        latent_model_input,
-                        t,
-                        encoder_hidden_states=text_embeddings,
-                        down_block_additional_residuals=down_block_res_samples,
-                        mid_block_additional_residual=mid_block_res_sample,
-                    )["sample"]
+                # predict the noise residual
+                noise_pred = self.unet(
+                    latent_model_input,
+                    t,
+                    encoder_hidden_states=text_embeddings,
+                    down_block_additional_residuals=down_block_res_samples,
+                    mid_block_additional_residual=mid_block_res_sample,
+                )["sample"]
 
                 # perform guidance
                 noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -253,7 +251,9 @@ class ControlNet(nn.Module):
             negative_prompts = [negative_prompts]
 
         # Prompts -> text embeds
-        text_embeds = self.get_text_embeds(prompts, negative_prompts)  # [2, 77, 768]
+        pos_embeds = self.get_text_embeds(prompts) # [1, 77, 768]
+        neg_embeds = self.get_text_embeds(negative_prompts)
+        text_embeds = torch.cat([neg_embeds, pos_embeds], dim=0) # [2, 77, 768]
 
         # Text embeds -> img latents
         latents = self.produce_latents(
@@ -271,7 +271,7 @@ class ControlNet(nn.Module):
 
 if __name__ == '__main__':
     """
-    python controlnet.py "bird flying into the sunset" --guidance_image_path scribbles/bird_scribble.png \
+    python controlnet_utils.py "bird flying into the sunset" --guidance_image_path scribbles/bird.png \
         --controlnet_conditioning_scale 0.5
     """
     import argparse

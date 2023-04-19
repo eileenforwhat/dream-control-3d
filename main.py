@@ -1,4 +1,3 @@
-import torch
 import argparse
 import sys
 
@@ -13,7 +12,8 @@ if __name__ == '__main__':
     """
     To run with controlnet:
     
-    python main.py --text "purple bird" --workspace trial -O --guidance_image_path scribbles/bird_scribble.png
+    python main.py --text "purple bird" --workspace trial -O \
+        --guidance_image_path scribbles/bird.png --guidance controlnet
     
     """
 
@@ -276,7 +276,7 @@ if __name__ == '__main__':
             from guidance.clip_utils import CLIP
             guidance = CLIP(device)
         elif opt.guidance == 'controlnet':
-            from controlnet import ControlNet
+            from guidance.controlnet_utils import ControlNet
             guidance = ControlNet(
                 opt.guidance_image_path, device, opt.fp16, opt.vram_O,
                 type=opt.controlnet_type, controlnet_conditioning_scale=opt.controlnet_conditioning_scale
