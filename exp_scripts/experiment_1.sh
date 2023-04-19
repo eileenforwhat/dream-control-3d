@@ -1,3 +1,4 @@
+# Run scripts for exp1 (--guidance controlnet) results, with no other improvements for single default view
 DATA_DIR=/mnt/data
 
 python main.py --text "a wooden chair with cushions on the seat" --workspace $DATA_DIR/exp1_chair -O --guidance controlnet --guidance_image_path scribbles/chair.png

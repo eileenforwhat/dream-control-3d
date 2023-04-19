@@ -1,3 +1,4 @@
+# Run scripts for baseline (--guidance stable-diffusion) results.
 DATA_DIR=/mnt/data
 
 python main.py --text "a wooden chair with cushions on the seat" --workspace $DATA_DIR/baseline_chair -O
