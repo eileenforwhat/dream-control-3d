@@ -10,6 +10,12 @@ from nerf.gui import NeRFGUI
 # torch.autograd.set_detect_anomaly(True)
 
 if __name__ == '__main__':
+    """
+    To run with controlnet:
+    
+    python main.py --text "purple bird" --workspace trial -O --guidance_image_path scribbles/bird_scribble.png
+    
+    """
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--text', default=None, help="text prompt")
@@ -70,6 +76,10 @@ if __name__ == '__main__':
     parser.add_argument('--known_view_scale', type=float, default=1.5, help="multiply --h/w by this for known view rendering")
     parser.add_argument('--known_view_noise_scale', type=float, default=2e-3, help="random camera noise added to rays_o and rays_d")
     parser.add_argument('--dmtet_reso_scale', type=float, default=8, help="multiply --h/w by this for dmtet finetuning")
+    # controlnet
+    parser.add_argument('--guidance_image_path', type=str, default="")
+    parser.add_argument('--controlnet_type', type=str, default="scribble")
+    parser.add_argument('--controlnet_conditioning_scale', type=float, default=0.5)
 
     ### dataset options
     parser.add_argument('--bound', type=float, default=1, help="assume the scene is bounded in box(-bound, bound)")
@@ -267,7 +277,10 @@ if __name__ == '__main__':
             guidance = CLIP(device)
         elif opt.guidance == 'controlnet':
             from controlnet import ControlNet
-            guidance = ControlNet(opt.guidance_image_path, device, opt.fp16, opt.vram_O, type=opt.controlnet_type)
+            guidance = ControlNet(
+                opt.guidance_image_path, device, opt.fp16, opt.vram_O,
+                type=opt.controlnet_type, controlnet_conditioning_scale=opt.controlnet_conditioning_scale
+            )
         else:
             raise NotImplementedError(f'--guidance {opt.guidance} is not implemented.')
 

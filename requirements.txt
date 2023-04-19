@@ -37,3 +37,7 @@ omegaconf
 pytorch-lightning
 git+https://github.com/CompVis/taming-transformers.git
 git+https://github.com/openai/CLIP.git
+
+# for controlnet
+einops
+controlnet_aux
