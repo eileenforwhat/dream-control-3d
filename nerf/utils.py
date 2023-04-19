@@ -503,6 +503,9 @@ class Trainer(object):
             if self.opt.lambda_lap > 0:
                 loss = loss + self.opt.lambda_lap * outputs['lap_loss']
 
+        if self.opt.guidance_image_view == data["dir"].item():
+            loss = self.opt.guidance_view_loss_factor * loss
+
         return pred_rgb, pred_depth, loss
     
     def post_train_step(self):

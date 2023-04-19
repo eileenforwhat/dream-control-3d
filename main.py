@@ -78,6 +78,8 @@ if __name__ == '__main__':
     parser.add_argument('--dmtet_reso_scale', type=float, default=8, help="multiply --h/w by this for dmtet finetuning")
     # controlnet
     parser.add_argument('--guidance_image_path', type=str, default="")
+    parser.add_argument('--guidance_image_view', type=int, default=0, help="Refer nerf/provider.py for what values represent. Default is 0 (front).")
+    parser.add_argument('--guidance_view_loss_factor', type=float, default = 1.0, help = "Scaling factor for loss when considered view is the same as the view described for the guidance image.")
     parser.add_argument('--controlnet_type', type=str, default="scribble")
     parser.add_argument('--controlnet_conditioning_scale', type=float, default=0.5)
 
