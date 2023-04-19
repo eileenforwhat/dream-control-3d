@@ -439,7 +439,12 @@ class Trainer(object):
         # novel view loss
         else:
 
-            if self.opt.guidance == 'stable-diffusion':
+            if self.opt.guidance == 'zero123':
+                polar = data['polar']
+                azimuth = data['azimuth']
+                radius = data['radius']
+                loss = self.guidance.train_step(self.image_z, pred_rgb, polar, azimuth, radius, as_latent=as_latent, guidance_scale=self.opt.guidance_scale, grad_scale=self.opt.lambda_guidance)
+            else:  # stable-diffusion, control-net, etc.
                 # interpolate text_z
                 azimuth = data['azimuth'] # [-180, 180]
                 
@@ -462,12 +467,6 @@ class Trainer(object):
                 uncond_z = self.text_z['uncond']
                 text_z = torch.cat([uncond_z, pos_z], dim=0)
                 loss = self.guidance.train_step(text_z, pred_rgb, as_latent=as_latent, guidance_scale=self.opt.guidance_scale, grad_scale=self.opt.lambda_guidance)
-
-            else: # zero123
-                polar = data['polar']
-                azimuth = data['azimuth']
-                radius = data['radius']
-                loss = self.guidance.train_step(self.image_z, pred_rgb, polar, azimuth, radius, as_latent=as_latent, guidance_scale=self.opt.guidance_scale, grad_scale=self.opt.lambda_guidance)
                 
         # regularizations
         if not self.opt.dmtet:
