@@ -1,3 +1,7 @@
+import cv2
+import numpy as np
+import os
+
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
@@ -8,6 +12,7 @@ from diffusers import (
 from diffusers.utils import load_image
 from diffusers.utils.import_utils import is_xformers_available
 from torch.cuda.amp import custom_bwd, custom_fwd
+from scripts.preprocess_image import BackgroundRemoval, DPT
 
 
 class SpecifyGradient(torch.autograd.Function):
@@ -29,6 +34,28 @@ class SpecifyGradient(torch.autograd.Function):
 def seed_everything(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
+
+
+def save_and_prepare_image(image, img_path, out_dir="data"):
+    image = image.squeeze(0)
+    # image: numpy image  (H, W, 3)
+    # img_path: guidance_img_path for controlnet (ex. scribble img path)
+    out_rgba = os.path.join(out_dir, os.path.basename(img_path).split('.')[0] + '_rgba.png')
+    out_depth = os.path.join(out_dir, os.path.basename(img_path).split('.')[0] + '_depth.png')
+
+    # predict depth (with bg as it's more stable)
+    print(f'[INFO] depth estimation...')
+    dpt_model = DPT()
+    depth = dpt_model(image)[0]
+    depth = (depth - depth.min()) / (depth.max() - depth.min() + 1e-9)
+    depth = (depth * 255).astype(np.uint8)
+    cv2.imwrite(out_depth, depth)
+
+    print(f'[INFO] background removal...')
+    image = BackgroundRemoval()(image) # [H, W, 4]
+    cv2.imwrite(out_rgba, cv2.cvtColor(image, cv2.COLOR_RGBA2BGRA))
+    print(f"writing controlnet images to {out_rgba} and {out_depth}")
+    return out_rgba
 
 
 # condition type to (controlnet model, stable-diffusion model)
@@ -105,6 +132,7 @@ class ControlNet(nn.Module):
             num_images_per_prompt,
             device,
             self.controlnet.dtype,
+            do_classifier_free_guidance=True
         )
 
         print(f'[INFO] loaded control net!')

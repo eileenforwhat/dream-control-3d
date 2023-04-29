@@ -8,6 +8,40 @@ from nerf.gui import NeRFGUI
 
 # torch.autograd.set_detect_anomaly(True)
 
+
+def set_opt_for_zero1to3(opt):
+    opt.text = None
+    opt.guidance = 'zero123'
+
+    opt.fovy_range = [opt.default_fovy, opt.default_fovy] # fix fov as zero123 doesn't support changing fov
+
+    # very important to keep the image's content
+    opt.guidance_scale = 3
+    opt.lambda_guidance = 0.01
+    opt.grad_clip = 1
+
+    # enforce surface smoothness in nerf stage
+    opt.lambda_normal_smooth = 1
+    opt.lambda_orient = 100
+
+    # latent warmup is not needed, we hardcode a 100-iter rgbd loss only warmup.
+    opt.warmup_iters = 0
+
+    # make shape init more stable
+    opt.progressive_view = True
+    opt.progressive_level = True
+    # record full range for progressive view expansion
+    # disable as they disturb progressive view
+    opt.jitter_pose = False
+    opt.uniform_sphere_rate = 0
+    # back up full range
+    opt.full_radius_range = opt.radius_range
+    opt.full_theta_range = opt.theta_range
+    opt.full_phi_range = opt.phi_range
+    opt.full_fovy_range = opt.fovy_range
+    return opt
+
+
 if __name__ == '__main__':
     """
     To run with controlnet:
@@ -27,6 +61,7 @@ if __name__ == '__main__':
     parser.add_argument('--workspace', type=str, default='workspace')
     parser.add_argument('--guidance', type=str, default='stable-diffusion', help='guidance model')
     parser.add_argument('--seed', default=None)
+    parser.add_argument('--device', default=0, type=int)
 
     parser.add_argument('--image', default=None, help="image prompt")
     parser.add_argument('--known_view_interval', type=int, default=2, help="train default view with RGB loss every & iters, only valid if --image is not None.")
@@ -221,7 +256,7 @@ if __name__ == '__main__':
     if opt.seed is not None:
         seed_everything(int(opt.seed))
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device(f"cuda:{opt.device}") if torch.cuda.is_available() else torch.device('cpu')
 
     model = NeRFNetwork(opt).to(device)
 
@@ -283,10 +318,28 @@ if __name__ == '__main__':
                 opt.guidance_image_path, device, opt.fp16, opt.vram_O,
                 type=opt.controlnet_type, controlnet_conditioning_scale=opt.controlnet_conditioning_scale
             )
+        elif opt.guidance == 'controlnet-zero123':
+            # basically just use controlnet to generate --image and then use zero1to3 guidance as usual
+            from guidance.controlnet_utils import ControlNet, save_and_prepare_image
+            # for some reason fp32 does not work
+            controlnet = ControlNet(
+                opt.guidance_image_path, device, fp16=False, vram_O=opt.vram_O,
+                type=opt.controlnet_type, controlnet_conditioning_scale=opt.controlnet_conditioning_scale
+            )
+            # do not use super high guidance scale (100) since the results tend to not work well
+            # with background crop in save_and_prepare_image
+            image = controlnet.prompt_to_img(opt.text, opt.negative, guidance_scale=7.5)
+            opt.image = save_and_prepare_image(image, opt.guidance_image_path, out_dir="data")
+
+            from guidance.zero123_utils import Zero123
+            opt = set_opt_for_zero1to3(opt)
+            guidance = Zero123(device, opt.fp16, opt.vram_O, opt.t_range)
         else:
             raise NotImplementedError(f'--guidance {opt.guidance} is not implemented.')
 
-        trainer = Trainer(' '.join(sys.argv), 'df', opt, model, guidance, device=device, workspace=opt.workspace, optimizer=optimizer, ema_decay=0.95, fp16=opt.fp16, lr_scheduler=scheduler, use_checkpoint=opt.ckpt, eval_interval=opt.eval_interval, scheduler_update_every_step=True)
+        trainer = Trainer(' '.join(sys.argv), 'df', opt, model, guidance, device=device, workspace=opt.workspace,
+                          optimizer=optimizer, ema_decay=0.95, fp16=opt.fp16, lr_scheduler=scheduler,
+                          use_checkpoint=opt.ckpt, eval_interval=opt.eval_interval, scheduler_update_every_step=True)
 
         trainer.default_view_data = train_loader._data.get_default_view_data()
 
