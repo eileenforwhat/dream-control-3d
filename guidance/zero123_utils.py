@@ -78,6 +78,7 @@ class Zero123(nn.Module):
         self.config = OmegaConf.load(config)
         # TODO: seems it cannot load into fp16...
         self.model = load_model_from_config(self.config, ckpt, device=self.device, vram_O=vram_O)
+        print("zero1to3 model loaded!")
 
         # timesteps: use diffuser for convenience... hope it's alright.
         self.num_train_timesteps = self.config.model.params.timesteps

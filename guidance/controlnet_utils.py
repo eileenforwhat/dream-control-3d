@@ -37,11 +37,11 @@ def seed_everything(seed):
 
 
 def save_and_prepare_image(image, img_path, out_dir="data"):
-    # image: numpy image
+    image = image.squeeze(0)
+    # image: numpy image  (H, W, 3)
     # img_path: guidance_img_path for controlnet (ex. scribble img path)
     out_rgba = os.path.join(out_dir, os.path.basename(img_path).split('.')[0] + '_rgba.png')
     out_depth = os.path.join(out_dir, os.path.basename(img_path).split('.')[0] + '_depth.png')
-    print(f"writing controlnet images to {out_rgba} and {out_depth}")
 
     # predict depth (with bg as it's more stable)
     print(f'[INFO] depth estimation...')
@@ -54,6 +54,7 @@ def save_and_prepare_image(image, img_path, out_dir="data"):
     print(f'[INFO] background removal...')
     image = BackgroundRemoval()(image) # [H, W, 4]
     cv2.imwrite(out_rgba, cv2.cvtColor(image, cv2.COLOR_RGBA2BGRA))
+    print(f"writing controlnet images to {out_rgba} and {out_depth}")
     return out_rgba
 
 
@@ -131,6 +132,7 @@ class ControlNet(nn.Module):
             num_images_per_prompt,
             device,
             self.controlnet.dtype,
+            do_classifier_free_guidance=True
         )
 
         print(f'[INFO] loaded control net!')
