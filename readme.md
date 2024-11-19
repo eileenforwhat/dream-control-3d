@@ -3,6 +3,9 @@
 A fork of [stable-dreamfusion](https://github.com/ashawkey/stable-dreamfusion) that adds ControlNet guidance to
 enable conditioning of 3d generation on user scribble. Includes zero1to3 support with ControlNet.
 
+# Final report
+Download final_report.pdf to read a summary of the project methodology and results. 
+
 # Install
 
 ```bash
